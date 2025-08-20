@@ -1,0 +1,83 @@
+- hosts: test_servers
+  become: yes
+  vars_files:
+    - ../vault/credentials.yml
+
+  vars:
+    tomcat_version: 9.0.108
+    tomcat_install_dir: /home/hamdu/tomcat
+    war_src: /var/lib/jenkins/workspace/Amazon-Jenkins_sonar-CI/target/Amazon.war
+    war_dest: "{{ tomcat_install_dir }}/webapps/Amazon.war"
+
+  tasks:
+    - name: Ensure Java is installed
+      apt:
+        name: openjdk-11-jdk
+        state: present
+        update_cache: yes
+
+    - name: Create Tomcat install directory
+      file:
+        path: "{{ tomcat_install_dir }}"
+        state: directory
+        owner: azureuser
+        group: azureuser
+        mode: '0755'
+
+    - name: Download Tomcat
+      get_url:
+        url: "https://dlcdn.apache.org/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+
+    - name: Extract Tomcat
+      unarchive:
+        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "{{ tomcat_install_dir }}"
+        remote_src: yes
+        extra_opts: [--strip-components=1]
+
+    - name: Fix ownership recursively for Tomcat
+      file:
+        path: "{{ tomcat_install_dir }}"
+        owner: azureuser
+        group: azureuser
+        recurse: yes
+
+    - name: Deploy tomcat-users.xml from template
+      template:
+        src: tomcat-users.xml.j2
+        dest: "{{ tomcat_install_dir }}/conf/tomcat-users.xml"
+        owner: azureuser
+        group: azureuser
+        mode: '0644'
+
+    - name: Ensure Tomcat bin scripts are executable
+      file:
+        path: "{{ tomcat_install_dir }}/bin/{{ item }}"
+        mode: '0755'
+        owner: azureuser
+        group: azureuser
+      loop:
+        - startup.sh
+        - catalina.sh
+        - shutdown.sh
+
+    - name: Copy WAR file to Tomcat webapps
+      copy:
+        src: "{{ war_src }}"
+        dest: "{{ war_dest }}"
+        owner: azureuser
+        group: azureuser
+        mode: '0644'
+
+    - name: Debug Tomcat bin directory permissions
+      command: ls -l {{ tomcat_install_dir }}/bin
+      register: bin_perms
+
+    - debug:
+        var: bin_perms.stdout_lines
+
+    - name: Start Tomcat
+      command: "{{ tomcat_install_dir }}/bin/startup.sh"
+      become: yes
+      become_user: azureuser
